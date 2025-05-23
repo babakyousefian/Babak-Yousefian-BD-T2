@@ -1,0 +1,111 @@
+import random
+import matplotlib.pyplot as plt
+import re
+from ast import literal_eval
+
+
+def loadData(filename="Doc1.txt"):
+    """
+    Load the document dictionary from the provided text file.
+    """
+    with open(filename, 'r', encoding='utf-8') as file:
+        data = file.read()
+    match = re.search(r"documents\s*=\s*(\{.*\})", data, re.DOTALL)
+    if match:
+        return literal_eval(match.group(1))
+    else:
+        raise ValueError("Could not extract dictionary from file")
+
+
+def get_shingles(text, k=3):
+    text = text.replace(" ", "")
+    return set(text[i:i+k] for i in range(len(text) - k + 1))
+
+
+def jaccard_similarity(set1, set2):
+    return len(set1 & set2) / len(set1 | set2) if set1 | set2 else 0.0
+
+
+def generate_hash_functions(num_funcs, max_shingle_id, prime):
+    hash_funcs = []
+    for _ in range(num_funcs):
+        a = random.randint(1, prime - 1)
+        b = random.randint(0, prime - 1)
+        hash_funcs.append(lambda x, a=a, b=b: (a * x + b) % prime)
+    return hash_funcs
+
+
+def build_signature_matrix(shingle_sets, hash_funcs, shingle_id_map):
+    num_docs = len(shingle_sets)
+    num_hashes = len(hash_funcs)
+    signatures = [[float('inf')] * num_docs for _ in range(num_hashes)]
+
+    for shingle, shingle_id in shingle_id_map.items():
+        for doc_idx, doc_shingles in enumerate(shingle_sets):
+            if shingle in doc_shingles:
+                for func_idx, h in enumerate(hash_funcs):
+                    hash_val = h(shingle_id)
+                    if hash_val < signatures[func_idx][doc_idx]:
+                        signatures[func_idx][doc_idx] = hash_val
+    return signatures
+
+
+def estimated_similarity(sig1, sig2):
+    return sum(1 for a, b in zip(sig1, sig2) if a == b) / len(sig1) if sig1 else 0.0
+
+
+def plot_similarity_matrix(matrix, labels, title):
+    plt.figure(figsize=(8, 6))
+    plt.imshow(matrix, cmap='viridis', interpolation='nearest')
+    plt.colorbar(label='Similarity')
+    plt.xticks(ticks=range(len(labels)), labels=labels)
+    plt.yticks(ticks=range(len(labels)), labels=labels)
+    plt.title(title)
+    for i in range(len(matrix)):
+        for j in range(len(matrix)):
+            plt.text(j, i, f"{matrix[i][j]:.2f}", ha='center', va='center', color='white')
+    plt.tight_layout()
+    plt.show()
+
+
+def main():
+    documents = loadData("Doc1.txt")
+    k = 3
+    doc_names = list(documents.keys())
+    shingle_sets = [get_shingles(documents[doc], k) for doc in doc_names]
+
+
+    all_shingles = set.union(*shingle_sets)
+    shingle_id_map = {shingle: idx for idx, shingle in enumerate(all_shingles)}
+    max_shingle_id = len(shingle_id_map)
+    prime = 4294967311
+    num_hashes = 20
+    hash_funcs = generate_hash_functions(num_hashes, max_shingle_id, prime)
+
+
+    exact_matrix = [[0.0]*len(doc_names) for _ in range(len(doc_names))]
+    for i in range(len(doc_names)):
+        for j in range(len(doc_names)):
+            exact_matrix[i][j] = jaccard_similarity(shingle_sets[i], shingle_sets[j])
+    print("\n=== Exact Jaccard Similarity Matrix ===")
+    for row in exact_matrix:
+        print(["{:.4f}".format(x) for x in row])
+    plot_similarity_matrix(exact_matrix, doc_names, "Exact Jaccard Similarity")
+
+
+    signatures = build_signature_matrix(shingle_sets, hash_funcs, shingle_id_map)
+
+
+    est_matrix = [[0.0]*len(doc_names) for _ in range(len(doc_names))]
+    for i in range(len(doc_names)):
+        for j in range(len(doc_names)):
+            sig1 = [signatures[h][i] for h in range(num_hashes)]
+            sig2 = [signatures[h][j] for h in range(num_hashes)]
+            est_matrix[i][j] = estimated_similarity(sig1, sig2)
+    print("\n=== Estimated Similarity Matrix ===")
+    for row in est_matrix:
+        print(["{:.4f}".format(x) for x in row])
+    plot_similarity_matrix(est_matrix, doc_names, "Estimated Similarity (MinHash)")
+
+if __name__ == "__main__":
+    main()
